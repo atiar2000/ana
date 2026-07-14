@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ana Orbit</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #050510;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            touch-action: none; /* Prevents scrolling on mobile/tablets */
+        }
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .hud {
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(255,255,255,0.5);
+        }
+        #score { color: #00ffcc; }
+        #highScore { color: #ff00ff; }
+        
+        #menu {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: auto;
+        }
+        h1 {
+            font-size: 48px;
+            margin: 0 0 20px 0;
+            color: #fff;
+            text-shadow: 0 0 20px #00ffcc, 0 0 40px #00ffcc;
+        }
+        button {
+            background: transparent;
+            color: #00ffcc;
+            border: 2px solid #00ffcc;
+            padding: 15px 40px;
+            font-size: 24px;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.2s;
+            box-shadow: 0 0 15px rgba(0, 255, 204, 0.3);
+        }
+        button:hover {
+            background: #00ffcc;
+            color: #050510;
+            box-shadow: 0 0 30px rgba(0, 255, 204, 0.8);
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui-layer">
+        <div class="hud">
+            <div id="score">Beat the Score: 0</div>
+            <div id="highScore">>Beat the Best: 0</div>
+        </div>
+        <div id="menu">
+            <h1 id="gameTitle">Ana ORBIT</h1>
+            <button id="startBtn" onclick="startGame()">PLAY</button>
+        </div>
+    </div>
+
+    <script>
+        /** 
+         * HEY MOM! TWEAK THESE VARIABLES TO MOD THE GAME!
+         * Change speeds, colors, and difficulty here. 
+         */
+        const GAME_CONFIG = {
+            playerColor: '#00ffcc',
+            playerSize: 15,
+            enemyColor: '#ff0055',
+            baseSpeed: 5,         // How fast enemies fall initially
+            speedMultiplier: 0.006, // How fast the game speeds up over time
+            spawnRate: 30,        // Lower = more enemies (frames between spawns)
+            starCount: 100,       // Background stars
+        };
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        // Game State
+        let isPlaying = false;
+        let score = 0;
+        let highScore = localStorage.getItem('neonOrbitHighScore') || 0;
+        let frameCount = 0;
+        let currentSpeed = GAME_CONFIG.baseSpeed;
+
+        document.getElementById('highScore').innerText = `Best: ${highScore}`;
+
+        // Entities
+        let player = { x: 0, y: 0 };
+        let enemies = [];
+        let particles = [];
+        let stars = [];
+
+        // Resize Canvas
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            if (!isPlaying) {
+                player.x = width / 2;
+                player.y = height - 100;
+            }
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Controls (Mouse and Touch)
+        function updatePlayerPosition(e) {
+            if (!isPlaying) return;
+            let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            
+            // Smooth follow with a slight boundary restriction
+            player.x = Math.max(20, Math.min(width - 20, clientX));
+            player.y = Math.max(20, Math.min(height - 20, clientY));
+        }
+        window.addEventListener('mousemove', updatePlayerPosition);
+        window.addEventListener('touchmove', updatePlayerPosition, {passive: false});
+        
+        // Prevent default touch behaviors like scrolling while swiping
+        document.addEventListener('touchmove', function(e) { e.preventDefault(); }, {passive: false});
+
+        function createStars() {
+            stars = [];
+            for (let i = 0; i < GAME_CONFIG.starCount; i++) {
+                stars.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * 2,
+                    speed: Math.random() * 3 + 1
+                });
+            }
+        }
+
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 30; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1,
+                    color: color
+                });
+            }
+        }
+
+        function startGame() {
+            document.getElementById('menu').style.display = 'none';
+            isPlaying = true;
+            score = 0;
+            frameCount = 0;
+            currentSpeed = GAME_CONFIG.baseSpeed;
+            enemies = [];
+            particles = [];
+            createStars();
+            
+            player.x = width / 2;
+            player.y = height - 100;
+            
+            gameLoop();
+        }
+
+        function gameOver() {
+            isPlaying = false;
+            createExplosion(player.x, player.y, GAME_CONFIG.playerColor);
+            
+            if (score > highScore) {
+                highScore = Math.floor(score);
+                localStorage.setItem('neonOrbitHighScore', highScore);
+                document.getElementById('highScore').innerText = `Best: ${highScore}`;
+                document.getElementById('gameTitle').innerText = "NEW RECORD!";
+            } else {
+                document.getElementById('gameTitle').innerText = "GAME OVER";
+            }
+            
+            document.getElementById('menu').style.display = 'block';
+            document.getElementById('startBtn').innerText = "TRY AGAIN";
+        }
+
+        function update() {
+            if (!isPlaying) return;
+
+            frameCount++;
+            score += 0.1;
+            document.getElementById('score').innerText = `Score: ${Math.floor(score)}`;
+            
+            // Difficulty curve
+            currentSpeed += GAME_CONFIG.speedMultiplier;
+
+            // Spawn Enemies
+            if (frameCount % Math.max(10, Math.floor(GAME_CONFIG.spawnRate - (currentSpeed / 2))) === 0) {
+                let size = Math.random() * 20 + 10;
+                enemies.push({
+                    x: Math.random() * width,
+                    y: -50,
+                    size: size,
+                    vx: (Math.random() - 0.5) * 2, // Slight horizontal drift
+                    vy: currentSpeed + (Math.random() * 2)
+                });
+            }
+
+            // Update Enemies
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                let e = enemies[i];
+                e.x += e.vx;
+                e.y += e.vy;
+
+                // Collision detection (Circle)
+                let dx = player.x - e.x;
+                let dy = player.y - e.y;
+                let distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < GAME_CONFIG.playerSize + e.size) {
+                    gameOver();
+                }
+
+                // Remove off-screen
+                if (e.y > height + 50) {
+                    enemies.splice(i, 1);
+                }
+            }
+
+            // Update Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.02;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+
+            // Update Stars
+            stars.forEach(s => {
+                s.y += s.speed * (currentSpeed / 5);
+                if (s.y > height) {
+                    s.y = 0;
+                    s.x = Math.random() * width;
+                }
+            });
+        }
+
+        function draw() {
+            // Clear screen with trail effect
+            ctx.fillStyle = 'rgba(5, 5, 16, 0.3)';
+            ctx.fillRect(0, 0, width, height);
+
+            // Draw Stars
+            ctx.fillStyle = '#ffffff';
+            stars.forEach(s => {
+                ctx.globalAlpha = Math.random() * 0.5 + 0.5;
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+
+            // Draw Player
+            if (isPlaying) {
+                ctx.fillStyle = GAME_CONFIG.playerColor;
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = GAME_CONFIG.playerColor;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, GAME_CONFIG.playerSize, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Player core
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, GAME_CONFIG.playerSize / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0; // Reset shadow for performance
+            }
+
+            // Draw Enemies
+            enemies.forEach(e => {
+                ctx.strokeStyle = GAME_CONFIG.enemyColor;
+                ctx.lineWidth = 3;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = GAME_CONFIG.enemyColor;
+                
+                ctx.beginPath();
+                // Draw a jagged asteroid shape
+                let spikes = 6;
+                for (let i = 0; i < spikes; i++) {
+                    let angle = (i / spikes) * Math.PI * 2;
+                    let r = e.size + (Math.random() * 5 - 2.5); // Add slight wobble
+                    let px = e.x + Math.cos(angle) * r;
+                    let py = e.y + Math.sin(angle) * r;
+                    if (i === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.stroke();
+            });
+            ctx.shadowBlur = 0;
+
+            // Draw Particles
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            
+            // Continue loop even if game over to animate particles
+            requestAnimationFrame(gameLoop); 
+        }
+
+        // Initialize background animation before playing
+        createStars();
+        gameLoop();
+
+    </script>
+</body>
+</html>
